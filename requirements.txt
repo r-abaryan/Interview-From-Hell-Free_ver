@@ -1,0 +1,19 @@
+# Python Requirements for Teen Persuasion ML-Agents Project
+
+# Core ML-Agents
+mlagents==0.30.0
+
+# Required by ML-Agents (should auto-install)
+torch>=1.7.1
+numpy>=1.19.5
+Pillow>=8.1.0
+protobuf>=3.14.0
+grpcio>=1.34.0
+pyyaml>=5.3.1
+cattrs>=1.1.1
+tensorboard>=2.7.0
+ollama>=0.1.10
+# Optional but recommended
+# matplotlib>=3.3.4  # For custom plotting
+# jupyter>=1.0.0     # For analysis notebooks
+
