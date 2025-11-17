@@ -32,6 +32,10 @@ public class InterviewUI : MonoBehaviour
     public Button submitTextButton;
     public GameObject textInputPanel; // Optional: panel containing text input
     
+    [Header("TTS Control - Assign in Inspector")]
+    public Button stopTTSButton; // Button to stop TTS speech
+    public TextMeshProUGUI stopTTSButtonText; // Optional: text on stop button
+    
     [Header("Result Panel - Assign in Inspector")]
     public TextMeshProUGUI resultText;
     public Button restartButton;
@@ -87,6 +91,13 @@ public class InterviewUI : MonoBehaviour
             quitButton.onClick.AddListener(QuitToMenu);
         }
         
+        // Setup stop TTS button
+        if (stopTTSButton != null)
+        {
+            stopTTSButton.onClick.AddListener(StopTTS);
+            stopTTSButton.gameObject.SetActive(false); // Hidden by default
+        }
+        
         // Find interviewer
         interviewer = FindFirstObjectByType<InterviewerAI>();
         
@@ -107,6 +118,31 @@ public class InterviewUI : MonoBehaviour
         if (interviewer != null)
         {
             UpdateStatusDisplay();
+            UpdateTTSButtonVisibility();
+        }
+    }
+    
+    private void UpdateTTSButtonVisibility()
+    {
+        // Show/hide stop TTS button based on whether TTS is speaking
+        if (stopTTSButton != null && interviewer != null && interviewer.voiceSystem != null)
+        {
+            bool isSpeaking = interviewer.voiceSystem.IsSpeaking;
+            stopTTSButton.gameObject.SetActive(isSpeaking);
+        }
+    }
+    
+    private void StopTTS()
+    {
+        if (interviewer != null && interviewer.voiceSystem != null)
+        {
+            interviewer.voiceSystem.StopSpeaking();
+            Debug.Log("[InterviewUI] TTS stopped by user");
+            
+            if (statusText != null)
+            {
+                statusText.text = "TTS stopped.";
+            }
         }
     }
     

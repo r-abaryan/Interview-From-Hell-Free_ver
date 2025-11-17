@@ -352,7 +352,12 @@ Strikes: {strikeCount}/{maxStrikes}";
                 _ => EmotionalState.Emotion.Neutral
             };
             
+            Debug.Log($"[InterviewerAI] Calling TTS for: '{text}' (emotion: {emotion})");
             voiceSystem.SpeakText(text, emotion);
+        }
+        else
+        {
+            Debug.LogWarning("[InterviewerAI] VoiceSystem is NULL! TTS will not work. Assign VoiceSystem in Inspector.");
         }
     }
     

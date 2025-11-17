@@ -30,6 +30,10 @@ public class VoiceSystem : MonoBehaviour
     [SerializeField] private string localTTSEndpoint = "http://localhost:5000/tts";
     [SerializeField] private string localSTTEndpoint = "http://localhost:5000/stt";
     
+    [Header("Ollama TTS (Optional)")]
+    [SerializeField] private string ollamaEndpoint = "http://localhost:11434/api/generate";
+    [SerializeField] private bool useOllamaTTS = false; // Use Ollama for TTS (requires TTS model)
+    
     public enum VoiceMode
     {
         UnityNative,    // Built-in TTS (Windows SAPI, macOS AVSpeechSynthesizer)
@@ -45,6 +49,7 @@ public class VoiceSystem : MonoBehaviour
     private bool isSpeaking = false;
     private Queue<TTSRequest> ttsQueue = new Queue<TTSRequest>();
     private bool isProcessingQueue = false;
+    private System.Diagnostics.Process currentTTSProcess = null; // Track current TTS process
     
     private class TTSRequest
     {
@@ -86,18 +91,42 @@ public class VoiceSystem : MonoBehaviour
         }
     }
     
+    private void OnDisable()
+    {
+        StopAllTTS();
+    }
+    
+    private void OnDestroy()
+    {
+        StopAllTTS();
+    }
+    
+    private void OnApplicationQuit()
+    {
+        StopAllTTS();
+    }
+    
     #endregion
     
     #region TTS (Text-to-Speech)
     
     public void SpeakText(string text, EmotionalState.Emotion emotion = EmotionalState.Emotion.Neutral, Action onComplete = null)
     {
-        if (!enableTTS || string.IsNullOrEmpty(text))
+        if (!enableTTS)
         {
+            Debug.LogWarning("[Voice] TTS is disabled!");
             onComplete?.Invoke();
             return;
         }
         
+        if (string.IsNullOrEmpty(text))
+        {
+            Debug.LogWarning("[Voice] Cannot speak empty text");
+            onComplete?.Invoke();
+            return;
+        }
+        
+        Debug.Log($"[Voice] Queuing TTS: '{text}' (emotion: {emotion}, mode: {voiceMode})");
         TTSRequest request = new TTSRequest(text, emotion, onComplete);
         ttsQueue.Enqueue(request);
     }
@@ -174,18 +203,84 @@ public class VoiceSystem : MonoBehaviour
     
     private IEnumerator SpeakWindowsSAPI(string text, EmotionalState.Emotion emotion)
     {
-        // Windows SAPI implementation
-        // Note: This requires System.Speech.dll reference
-        
+        // Windows SAPI implementation using PowerShell
         float duration = EstimateSpeechDuration(text);
-        Debug.Log($"[Voice] Windows TTS: {text}");
+        Debug.Log($"[Voice] Windows TTS: Speaking '{text}' (duration: {duration}s)");
         
-        // You would use System.Speech.Synthesis.SpeechSynthesizer here
-        // synth.Rate = CalculateSpeechRate(emotion);
-        // synth.Volume = 100;
-        // synth.SpeakAsync(text);
+        #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+        System.Diagnostics.Process process = null;
+        bool success = false;
         
+        try
+        {
+            // Use a simpler approach: write text to a temp file and read it
+            // This avoids PowerShell escaping issues
+            string tempFile = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "tts_temp.txt");
+            System.IO.File.WriteAllText(tempFile, text);
+            
+            int rate = CalculateSpeechRate(emotion);
+            
+            // Use PowerShell with file input to avoid escaping issues
+            string command = $"-Command \"$text = Get-Content '{tempFile}' -Raw; Add-Type -AssemblyName System.Speech; $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer; $synth.Rate = {rate}; $synth.Volume = 100; $synth.Speak($text); Remove-Item '{tempFile}'\"";
+            
+            System.Diagnostics.ProcessStartInfo psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = command,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            
+            Debug.Log($"[Voice] Starting PowerShell TTS process...");
+            process = System.Diagnostics.Process.Start(psi);
+            
+            if (process != null)
+            {
+                success = true;
+                currentTTSProcess = process; // Store reference for cleanup
+                Debug.Log($"[Voice] PowerShell process started (PID: {process.Id})");
+            }
+            else
+            {
+                Debug.LogError("[Voice] Failed to start PowerShell process");
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[Voice] Windows TTS failed: {e.Message}\n{e.StackTrace}");
+            success = false;
+        }
+        
+        // Wait for speech to complete (estimate duration) - outside try-catch
         yield return new WaitForSeconds(duration);
+        
+        // Clean up process if still running
+        if (success && process != null)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill();
+                    Debug.Log("[Voice] TTS process terminated");
+                }
+                process.Dispose();
+                if (currentTTSProcess == process)
+                {
+                    currentTTSProcess = null; // Clear reference
+                }
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[Voice] Error cleaning up process: {e.Message}");
+            }
+        }
+        #else
+        Debug.LogWarning("[Voice] Windows TTS only works on Windows platform");
+        yield return new WaitForSeconds(duration);
+        #endif
     }
     
     private IEnumerator SpeakMacOS(string text, EmotionalState.Emotion emotion)
@@ -243,9 +338,25 @@ public class VoiceSystem : MonoBehaviour
     
     private IEnumerator SpeakWebAPI(string text, EmotionalState.Emotion emotion)
     {
-        // Example: Google TTS, Azure TTS, etc.
-        Debug.LogWarning("[Voice] Web API TTS not implemented yet");
-        yield return new WaitForSeconds(EstimateSpeechDuration(text));
+        // Use Ollama TTS if enabled, otherwise fallback to Windows SAPI
+        if (useOllamaTTS)
+        {
+            yield return StartCoroutine(SpeakOllamaTTS(text, emotion));
+        }
+        else
+        {
+            // Fallback: Use Windows SAPI
+            Debug.LogWarning("[Voice] Web API TTS not configured. Using Windows SAPI fallback.");
+            yield return StartCoroutine(SpeakWindowsSAPI(text, emotion));
+        }
+    }
+    
+    private IEnumerator SpeakOllamaTTS(string text, EmotionalState.Emotion emotion)
+    {
+        // Note: Ollama doesn't have built-in TTS, but we can use it with a TTS model
+        // For now, fallback to Windows SAPI
+        Debug.LogWarning("[Voice] Ollama TTS not directly supported. Using Windows SAPI fallback.");
+        yield return StartCoroutine(SpeakWindowsSAPI(text, emotion));
     }
     
     #endregion
@@ -463,6 +574,41 @@ public class VoiceSystem : MonoBehaviour
         audioSource.Stop();
         isSpeaking = false;
         StopAllCoroutines();
+        StopCurrentTTSProcess();
+    }
+    
+    private void StopAllTTS()
+    {
+        Debug.Log("[Voice] Stopping all TTS...");
+        ttsQueue.Clear();
+        audioSource.Stop();
+        isSpeaking = false;
+        isProcessingQueue = false;
+        StopAllCoroutines();
+        StopCurrentTTSProcess();
+    }
+    
+    private void StopCurrentTTSProcess()
+    {
+        if (currentTTSProcess != null)
+        {
+            try
+            {
+                if (!currentTTSProcess.HasExited)
+                {
+                    Debug.Log($"[Voice] Killing TTS process (PID: {currentTTSProcess.Id})");
+                    currentTTSProcess.Kill();
+                    // Wait a bit for process to exit
+                    currentTTSProcess.WaitForExit(1000);
+                }
+                currentTTSProcess.Dispose();
+                currentTTSProcess = null;
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogWarning($"[Voice] Error stopping TTS process: {e.Message}");
+            }
+        }
     }
     
     public void SetVolume(float newVolume)
