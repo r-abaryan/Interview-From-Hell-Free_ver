@@ -141,8 +141,11 @@ public class InterviewUI : MonoBehaviour
             
             if (statusText != null)
             {
-                statusText.text = "TTS stopped.";
+                statusText.text = "TTS stopped. Ready for next question.";
             }
+            
+            // Re-enable inputs after stopping TTS
+            EnableMicButton();
         }
     }
     

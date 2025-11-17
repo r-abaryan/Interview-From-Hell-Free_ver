@@ -135,11 +135,23 @@ public class VoiceSystem : MonoBehaviour
     {
         isProcessingQueue = true;
         
-        while (ttsQueue.Count > 0)
+        while (ttsQueue.Count > 0 && isProcessingQueue)
         {
             TTSRequest request = ttsQueue.Dequeue();
             
+            // Check if we should continue (in case StopSpeaking was called)
+            if (!isProcessingQueue)
+            {
+                break;
+            }
+            
             yield return StartCoroutine(SpeakInternal(request.text, request.emotion));
+            
+            // Check again after speaking
+            if (!isProcessingQueue)
+            {
+                break;
+            }
             
             request.onComplete?.Invoke();
             
@@ -148,6 +160,7 @@ public class VoiceSystem : MonoBehaviour
         }
         
         isProcessingQueue = false;
+        isSpeaking = false; // Ensure speaking flag is reset
     }
     
     private IEnumerator SpeakInternal(string text, EmotionalState.Emotion emotion)
@@ -570,11 +583,14 @@ public class VoiceSystem : MonoBehaviour
     
     public void StopSpeaking()
     {
+        Debug.Log("[Voice] StopSpeaking() called");
         ttsQueue.Clear();
         audioSource.Stop();
         isSpeaking = false;
-        StopAllCoroutines();
+        isProcessingQueue = false; // Reset queue processing flag
         StopCurrentTTSProcess();
+        // Don't stop ALL coroutines - only stop the TTS queue processing
+        // This allows new TTS requests to work after stopping
     }
     
     private void StopAllTTS()
