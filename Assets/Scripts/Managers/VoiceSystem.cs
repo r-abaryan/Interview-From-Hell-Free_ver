@@ -32,6 +32,8 @@ public class VoiceSystem : MonoBehaviour
     
     [Header("Local TTS (Optional)")]
     [SerializeField] private string localTTSEndpoint = "http://localhost:5000/tts";
+    [SerializeField] private string localTTSHealthEndpoint = "http://localhost:5000/health";
+    [SerializeField] private bool autoDetectLocalTTS = true;
     [SerializeField] private string localSTTEndpoint = "http://localhost:5000/stt";
     
     [Header("Ollama TTS (Optional)")]
@@ -54,6 +56,7 @@ public class VoiceSystem : MonoBehaviour
     private Queue<TTSRequest> ttsQueue = new Queue<TTSRequest>();
     private bool isProcessingQueue = false;
     private System.Diagnostics.Process currentTTSProcess = null; // Track current TTS process
+    private bool hasAutoSwitchedToLocal = false;
     
     private class TTSRequest
     {
@@ -476,6 +479,10 @@ if ($neuralVoice) { $synth.SelectVoice($neuralVoice.VoiceInfo.Name); }
         {
             case VoiceMode.UnityNative:
                 Debug.Log("[Voice] Using native platform TTS");
+                if (autoDetectLocalTTS && !hasAutoSwitchedToLocal)
+                {
+                    StartCoroutine(DetectAndSwitchToLocalTTS());
+                }
                 break;
             
             case VoiceMode.LocalModel:
@@ -493,23 +500,58 @@ if ($neuralVoice) { $synth.SelectVoice($neuralVoice.VoiceInfo.Name); }
         }
     }
     
-    private IEnumerator TestLocalConnection()
+    private IEnumerator DetectAndSwitchToLocalTTS()
     {
-        using (UnityWebRequest www = UnityWebRequest.Get(localTTSEndpoint))
+        string pingUrl = GetLocalHealthUrl();
+        using (UnityWebRequest www = UnityWebRequest.Get(pingUrl))
         {
             www.timeout = 2;
             yield return www.SendWebRequest();
             
             if (www.result != UnityWebRequest.Result.Success)
             {
-                Debug.LogWarning($"[Voice] Local TTS server not reachable. Falling back to simulation mode.");
-                voiceMode = VoiceMode.Disabled;
+                Debug.Log("[Voice] Local TTS not detected. Staying on native voice.");
+            }
+            else
+            {
+                Debug.Log("[Voice] Local TTS server detected! Switching to local voice.");
+                hasAutoSwitchedToLocal = true;
+                voiceMode = VoiceMode.LocalModel;
+                InitializeVoiceSystem();
+            }
+        }
+    }
+    
+    private IEnumerator TestLocalConnection()
+    {
+        string pingUrl = GetLocalHealthUrl();
+        using (UnityWebRequest www = UnityWebRequest.Get(pingUrl))
+        {
+            www.timeout = 2;
+            yield return www.SendWebRequest();
+            
+            if (www.result != UnityWebRequest.Result.Success)
+            {
+                Debug.LogWarning("[Voice] Local TTS server not reachable. Falling back to native voice.");
+                if (!autoDetectLocalTTS)
+                {
+                    voiceMode = VoiceMode.UnityNative;
+                }
             }
             else
             {
                 Debug.Log("[Voice] Local TTS server connected successfully!");
             }
         }
+    }
+    
+    private string GetLocalHealthUrl()
+    {
+        if (!string.IsNullOrEmpty(localTTSHealthEndpoint))
+        {
+            return localTTSHealthEndpoint;
+        }
+        return localTTSEndpoint;
     }
     
     private float CalculatePitchForEmotion(EmotionalState.Emotion emotion)
