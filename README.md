@@ -1,4 +1,4 @@
-# Job Interview From Hell 🎤💼
+# Job Interview From Hell Free version🎤💼
 
 A voice-powered interview game where you must survive 5 absurd questions from an AI interviewer. Answer using your **real voice** (or text), and the AI evaluates your emotion, tone, confidence, and meaning. The interviewer gets angry, misunderstands you, changes topics, and tests your patience.
 
